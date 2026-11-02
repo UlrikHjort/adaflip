@@ -1,0 +1,15 @@
+--  AdaFlip: a combat racer in Ada
+--  Copyright (c) 2026 Ulrik Hørlyk Hjort
+--  SPDX-License-Identifier: MIT
+--
+project Simtest is
+   for Source_Dirs use ("src", "tests");
+   for Source_Files use ("math3d.ads", "math3d.adb", "track.ads", "track.adb",
+                         "vehicle.ads", "vehicle.adb", "race.ads", "race.adb", "simtest.adb", "walltest.adb");
+   for Object_Dir use "obj/test";
+   for Exec_Dir use "bin";
+   for Main use ("simtest.adb", "walltest.adb");
+   package Compiler is
+      for Default_Switches ("Ada") use ("-O2", "-gnat2012", "-gnatwa", "-gnatyN", "-gnatwU", "-gnata");
+   end Compiler;
+end Simtest;

@@ -1,0 +1,354 @@
+--  AdaFlip: a combat racer in Ada
+--  Copyright (c) 2026 Ulrik Hørlyk Hjort
+--  SPDX-License-Identifier: MIT
+--
+with Ada.Numerics.Elementary_Functions;
+with Interfaces;
+with Interfaces.C;
+with Interfaces.C.Strings;
+with System;
+
+package body Audio is
+
+   use Ada.Numerics.Elementary_Functions;
+   use Interfaces;
+   use type C.int;
+   use type System.Address;
+
+   Two_Pi : constant := 6.28318_53072;
+   Rate   : constant := 44_100;
+   Frames : constant := 441;      --  ten milliseconds a block
+   Dt     : constant Float := 1.0 / Float (Rate);
+
+   type Sample_Spec is record
+      Format      : C.int;
+      Sample_Rate : Unsigned_32;
+      Channels    : Unsigned_8;
+   end record
+     with Convention => C;
+
+   type Buffer_Attr is record
+      Max_Length, T_Length, Pre_Buf, Min_Req, Frag_Size : Unsigned_32;
+   end record
+     with Convention => C;
+
+   function PA_New
+     (Server : C.Strings.chars_ptr; Name : C.Strings.chars_ptr; Dir : C.int;
+      Dev : C.Strings.chars_ptr; Stream_Name : C.Strings.chars_ptr;
+      Spec : access Sample_Spec; Map : System.Address; Attr : access Buffer_Attr;
+      Error : access C.int) return System.Address
+     with Import, Convention => C, External_Name => "pa_simple_new";
+
+   function PA_Write (S : System.Address; Data : System.Address; Bytes : C.size_t;
+                      Error : access C.int) return C.int
+     with Import, Convention => C, External_Name => "pa_simple_write";
+
+   procedure PA_Free (S : System.Address)
+     with Import, Convention => C, External_Name => "pa_simple_free";
+
+   type Shot is record
+      E : Effect := Bang;
+      Level, Pan : Float := 0.0;
+   end record;
+   type Shot_List is array (1 .. 32) of Shot;
+
+   protected Shared is
+      procedure Put (P : Params);
+      function Get return Params;
+      procedure Queue (S : Shot);
+      procedure Take (L : out Shot_List; N : out Natural);
+      procedure Halt;
+      function Stopping return Boolean;
+   private
+      Current : Params;
+      Q : Shot_List;
+      Count : Natural := 0;
+      Stop_It : Boolean := False;
+   end Shared;
+
+   protected body Shared is
+      procedure Put (P : Params) is
+      begin
+         Current := P;
+      end Put;
+      function Get return Params is (Current);
+      procedure Queue (S : Shot) is
+      begin
+         if Count < Q'Last then
+            Count := Count + 1;
+            Q (Count) := S;
+         end if;
+      end Queue;
+      procedure Take (L : out Shot_List; N : out Natural) is
+      begin
+         L := Q;
+         N := Count;
+         Count := 0;
+      end Take;
+      procedure Halt is
+      begin
+         Stop_It := True;
+      end Halt;
+      function Stopping return Boolean is (Stop_It);
+   end Shared;
+
+   procedure Set (P : Params) is
+   begin
+      Shared.Put (P);
+   end Set;
+
+   procedure Play (E : Effect; Level : Float := 1.0; Pan : Float := 0.0) is
+   begin
+      Shared.Queue ((E, Level, Pan));
+   end Play;
+
+   --  A low pass of one pole
+   type Filter is record
+      Y : Float := 0.0;
+   end record;
+
+   function Low (F : in out Filter; X, Cut : Float) return Float is
+      A : constant Float := 1.0 - Exp (-Two_Pi * Float'Min (Cut, 18_000.0) * Dt);
+   begin
+      F.Y := F.Y + A * (X - F.Y);
+      return F.Y;
+   end Low;
+
+   type Seed_Type is mod 2**32;
+
+   --  A sound playing
+   type Voice is record
+      On : Boolean := False;
+      E : Effect := Bang;
+      Age, Level, Pan : Float := 0.0;
+      Ph1, Ph2 : Float := 0.0;
+      F1, F2 : Filter;
+   end record;
+   type Voice_Array is array (1 .. 24) of Voice;
+
+   task Mixer is
+      entry Go;
+   end Mixer;
+
+   task body Mixer is
+      Spec : aliased Sample_Spec := (Format => 3, Sample_Rate => Rate, Channels => 2);  --  S16LE
+      Attr : aliased Buffer_Attr :=
+        (Max_Length => Unsigned_32'Last, T_Length => Unsigned_32 (Frames * 4 * 3),
+         Pre_Buf => Unsigned_32'Last, Min_Req => Unsigned_32'Last, Frag_Size => Unsigned_32'Last);
+      Err : aliased C.int := 0;
+      Stream : System.Address := System.Null_Address;
+      type Sample_Array is array (0 .. 2 * Frames - 1) of Integer_16 with Convention => C;
+      Buffer : aliased Sample_Array;
+      Name : C.Strings.chars_ptr := C.Strings.New_String ("AdaFlip");
+      SName : C.Strings.chars_ptr := C.Strings.New_String ("game");
+      Seed : Seed_Type := 7;
+      function Noise return Float is
+      begin
+         Seed := Seed * 1664525 + 1013904223;
+         return Float (Seed / 65536) / 32768.0 - 1.0;
+      end Noise;
+      Voices : Voice_Array;
+      P : Params;
+      Speed_S, Thr_S, Scrape_S, Slip_S, Other_S, Other_L, Other_P : Float := 0.0;
+      Eng1, Eng2, Whine, Oth : Float := 0.0;
+      Eng_F, Wind_F, Scr_F, Scr_F2, Oth_F, Slip_F : Filter;
+      Shots : Shot_List;
+      N_Shots : Natural;
+   begin
+      select
+         accept Go;
+      or
+         terminate;
+      end select;
+      Stream := PA_New (C.Strings.Null_Ptr, Name, 1, C.Strings.Null_Ptr, SName,
+                        Spec'Access, System.Null_Address, Attr'Access, Err'Access);
+      C.Strings.Free (Name);
+      C.Strings.Free (SName);
+      while Stream /= System.Null_Address and then not Shared.Stopping loop
+         P := Shared.Get;
+         Shared.Take (Shots, N_Shots);
+         for K in 1 .. N_Shots loop
+            for V of Voices loop
+               if not V.On then
+                  V := (On => True, E => Shots (K).E, Age => 0.0,
+                        Level => Shots (K).Level, Pan => Shots (K).Pan, others => <>);
+                  exit;
+               end if;
+            end loop;
+         end loop;
+         for I in 0 .. Frames - 1 loop
+            declare
+               K : constant Float := 0.0015;
+               L, R : Float := 0.0;
+               Gear_Span : constant Float := 19.0;
+               G : Float;
+               Rev : Float;
+               F : Float;
+               S : Float;
+            begin
+               Speed_S := Speed_S + K * (P.Speed - Speed_S);
+               Thr_S := Thr_S + K * (P.Throttle - Thr_S);
+               Scrape_S := Scrape_S + 0.004 * (P.Scrape - Scrape_S);
+               Slip_S := Slip_S + 0.003 * (P.Slip - Slip_S);
+               Other_S := Other_S + K * (P.Other_Speed - Other_S);
+               Other_L := Other_L + K * (P.Other_Level - Other_L);
+               Other_P := Other_P + K * (P.Other_Pan - Other_P);
+
+               --  The engine: a growl that climbs through its gears
+               G := Speed_S / Gear_Span;
+               Rev := 0.42 + 0.58 * (G - Float'Floor (G)) ** 0.8;
+               if Speed_S > 4.0 * Gear_Span then
+                  Rev := 0.42 + 0.58 * Float'Min (1.4, (Speed_S - 3.0 * Gear_Span) / Gear_Span);
+               end if;
+               if P.Air then
+                  Rev := Rev + 0.2 * Thr_S;
+               end if;
+               F := 48.0 + 120.0 * Rev * (if P.Boost then 1.12 else 1.0);
+               Eng1 := Eng1 + F * Dt;
+               Eng1 := Eng1 - Float'Floor (Eng1);
+               Eng2 := Eng2 + F * 1.503 * Dt;
+               Eng2 := Eng2 - Float'Floor (Eng2);
+               Whine := Whine + (300.0 + Speed_S * 16.0) * Dt;
+               Whine := Whine - Float'Floor (Whine);
+               S := (2.0 * Eng1 - 1.0) * 0.6 + (2.0 * Eng2 - 1.0) * 0.3
+                 + Sin (Two_Pi * Eng1 * 0.5) * 0.5;
+               S := Low (Eng_F, S, 500.0 + 2200.0 * Thr_S + Speed_S * 15.0)
+                 * (0.35 + 0.65 * Thr_S)
+                 + Sin (Two_Pi * Whine) * 0.05 * Float'Min (1.0, Speed_S / 40.0);
+               L := L + S * 0.32;
+               R := R + S * 0.32;
+
+               --  Wind, tyres and scraping
+               S := Low (Wind_F, Noise, 300.0 + Speed_S * 30.0) * Float'Min (1.0, (Speed_S / 70.0) ** 2) * 0.5;
+               L := L + S;
+               R := R + S;
+               S := (Noise - Low (Scr_F, Noise, 1500.0)) * Scrape_S * 0.5;
+               S := Low (Scr_F2, S, 6000.0);
+               L := L + S;
+               R := R + S;
+               S := Low (Slip_F, Noise, 900.0) * Slip_S * 0.35 * Float'Min (1.0, Speed_S / 15.0);
+               L := L + S;
+               R := R + S;
+
+               --  The nearest other car
+               if Other_L > 0.002 then
+                  Oth := Oth + (55.0 + Other_S * 3.0) * Dt;
+                  Oth := Oth - Float'Floor (Oth);
+                  S := Low (Oth_F, 2.0 * Oth - 1.0, 900.0) * Other_L * 0.25;
+                  L := L + S * (1.0 - Other_P) * 0.7;
+                  R := R + S * (1.0 + Other_P) * 0.7;
+               end if;
+
+               --  What goes bang
+               for V of Voices loop
+                  if V.On then
+                     declare
+                        A : constant Float := V.Age;
+                        X : Float := 0.0;
+                        Len : Float := 1.0;
+                     begin
+                        case V.E is
+                           when Bang =>
+                              Len := 1.6;
+                              X := Low (V.F1, Noise, 3000.0 * Exp (-A * 3.0) + 120.0) * 2.2 * Exp (-A * 2.6)
+                                + Sin (Two_Pi * V.Ph1) * Exp (-A * 7.0) * 1.2;
+                              V.Ph1 := V.Ph1 + (42.0 + 40.0 * Exp (-A * 10.0)) * Dt;
+                           when Thud =>
+                              Len := 0.3;
+                              X := Sin (Two_Pi * V.Ph1) * Exp (-A * 18.0)
+                                + Low (V.F1, Noise, 600.0) * Exp (-A * 25.0) * 1.5;
+                              V.Ph1 := V.Ph1 + 65.0 * Dt;
+                           when Pickup =>
+                              Len := 0.3;
+                              declare
+                                 Fq : constant Float :=
+                                   (if A < 0.07 then 880.0 elsif A < 0.14 then 1175.0 else 1760.0);
+                              begin
+                                 V.Ph1 := V.Ph1 + Fq * Dt;
+                                 X := Sin (Two_Pi * V.Ph1) * 0.35 * Exp (-(A - 0.07 * Float'Floor (A / 0.07)) * 20.0);
+                              end;
+                           when Launch =>
+                              Len := 0.7;
+                              X := Low (V.F1, Noise, 400.0 + 3000.0 * A) * 1.4 * Exp (-A * 4.0)
+                                * Float'Min (1.0, A * 40.0);
+                           when Drop =>
+                              Len := 0.35;
+                              V.Ph1 := V.Ph1 + 310.0 * Dt;
+                              V.Ph2 := V.Ph2 + 477.0 * Dt;
+                              X := (Sin (Two_Pi * V.Ph1) + Sin (Two_Pi * V.Ph2)) * 0.3 * Exp (-A * 14.0);
+                           when Zap =>
+                              Len := 0.7;
+                              V.Ph1 := V.Ph1 + (1400.0 * Exp (-A * 5.0) + 60.0) * Dt;
+                              X := (if V.Ph1 - Float'Floor (V.Ph1) < 0.5 then 0.3 else -0.3) * Exp (-A * 3.5)
+                                + Low (V.F1, Noise, 2000.0) * 0.5 * Exp (-A * 6.0);
+                           when Whoosh =>
+                              Len := 1.0;
+                              X := Low (V.F1, Noise, 200.0 + 2500.0 * A) * 1.2 * Sin (3.1416 * A / Len);
+                              V.Ph1 := V.Ph1 + (80.0 + 120.0 * A) * Dt;
+                              X := X + (2.0 * (V.Ph1 - Float'Floor (V.Ph1)) - 1.0) * 0.15 * (1.0 - A);
+                           when Shield =>
+                              Len := 0.8;
+                              V.Ph1 := V.Ph1 + 523.0 * Dt;
+                              V.Ph2 := V.Ph2 + 784.0 * (1.0 + 0.01 * Sin (A * 40.0)) * Dt;
+                              X := (Sin (Two_Pi * V.Ph1) + Sin (Two_Pi * V.Ph2)) * 0.18
+                                * Sin (3.1416 * A / Len);
+                           when Beep_Low | Beep_High =>
+                              Len := (if V.E = Beep_Low then 0.22 else 0.6);
+                              V.Ph1 := V.Ph1 + (if V.E = Beep_Low then 660.0 else 1320.0) * Dt;
+                              X := (if V.Ph1 - Float'Floor (V.Ph1) < 0.5 then 0.22 else -0.22)
+                                * Float'Min (1.0, (Len - A) * 30.0);
+                           when Lap =>
+                              Len := 0.45;
+                              V.Ph1 := V.Ph1 + (if A < 0.15 then 988.0 else 1319.0) * Dt;
+                              X := Sin (Two_Pi * V.Ph1) * 0.3 * Float'Min (1.0, (Len - A) * 10.0);
+                        end case;
+                        X := X * V.Level;
+                        L := L + X * (1.0 - V.Pan * 0.6);
+                        R := R + X * (1.0 + V.Pan * 0.6);
+                        V.Age := V.Age + Dt;
+                        if V.Age > Len then
+                           V.On := False;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+
+               L := L * P.Master;
+               R := R * P.Master;
+               --  softly limited
+               L := L / (1.0 + abs L);
+               R := R / (1.0 + abs R);
+               Buffer (2 * I) := Integer_16 (L * 30_000.0);
+               Buffer (2 * I + 1) := Integer_16 (R * 30_000.0);
+            end;
+         end loop;
+         if PA_Write (Stream, Buffer'Address, C.size_t (Buffer'Size / 8), Err'Access) < 0 then
+            exit;
+         end if;
+      end loop;
+      if Stream /= System.Null_Address then
+         PA_Free (Stream);
+      end if;
+   exception
+      when others =>
+         if Stream /= System.Null_Address then
+            PA_Free (Stream);
+         end if;
+   end Mixer;
+
+   Started : Boolean := False;
+
+   procedure Start is
+   begin
+      if not Started then
+         Started := True;
+         Mixer.Go;
+      end if;
+   end Start;
+
+   procedure Stop is
+   begin
+      Shared.Halt;
+   end Stop;
+
+end Audio;
