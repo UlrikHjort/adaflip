@@ -384,18 +384,42 @@ package body Race is
          end if;
       end loop;
       declare
+         use type Track.Section_Kind;
          Half : constant Float := Float'Max (0.0, Track.Floor_Half (Aim_S) - 1.2);
          A : constant Track.Sample := Track.At_S (Aim_S);
-         Tgt : constant Vec3 := Track.Floor_Point (Aim_S, Clamp (Lane, -Half, Half)) + 0.9 * A.N;
-         Dir : constant Vec3 := Tgt - C.P;
+         Kind : constant Track.Section_Kind := Track.At_S (C.S + 20.0).Kind;
+         Stunt : constant Boolean :=
+           I = Player and then Stunt_Player and then Kind /= Track.Open and then Kind /= Track.Wide
+           and then Track.At_S (C.S + 10.0).Kind = Kind and then C.Speed > 22.0;
+         Tgt : Vec3 := Track.Floor_Point (Aim_S, Clamp (Lane, -Half, Half)) + 0.9 * A.N;
+         Dir : Vec3;
          N : constant Vec3 := (if C.Grounded > 0 then C.Ground_N else C.Side * C.U);
          F : constant Vec3 := Normalize (C.F - Dot (C.F, N) * N);
          Rt : constant Vec3 := Cross (F, N);
-         Ang : constant Float := Arctan (Dot (Dir, Rt), Dot (Dir, F));
+         Ang : Float;
          V1 : constant Float := Track.At_S (C.S + 6.0).Vmax;
          V2 : constant Float := Track.At_S (C.S + C.Speed * 0.6).Vmax;
          Vt : constant Float := Float'Min (V1, V2) * R.Skill;
       begin
+         --  Up the wall, round towards the roof, a little at a time
+         if Stunt then
+            declare
+               Now_A : constant Float := Track.Angle_Of (Track.Locate (C.P, C.Hint));
+               Side : constant Float := (if Now_A >= 0.0 then 1.0 else -1.0);
+               Want : constant Float :=
+                 (if Kind = Track.Halfpipe then 1.25 else 3.1416) * Side;
+               Next : constant Float := Now_A + Clamp (Want - Now_A, -0.7, 0.7);
+               S2 : constant Track.Sample := Track.At_S (Aim_S);
+               P2 : constant Vec3 := Track.Round_Point (Aim_S, Next);
+               NX, NY : Float;
+               LL : constant Track.Locus := Track.Locate (P2, C.Hint);
+            begin
+               Track.Profile_Normal (LL.P, LL.X, LL.Y, NX, NY);
+               Tgt := P2 + 0.9 * (NX * S2.B + NY * S2.N);
+            end;
+         end if;
+         Dir := Tgt - C.P;
+         Ang := Arctan (Dot (Dir, Rt), Dot (Dir, F));
          Out_C.Steer := Clamp (Ang * 2.6, -1.0, 1.0);
          if C.Speed < Vt then
             Out_C.Throttle := (if abs Ang > 1.0 then 0.5 else 1.0);

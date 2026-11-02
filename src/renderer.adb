@@ -62,6 +62,8 @@ package body Renderer is
    Cam_U_Screen : Vec3 := Up_Y;
    Cam_Fov : Float := 70.0;
    Cam_Fresh : Boolean := True;
+   Spec_Up : Vec3 := Up_Y;
+   Spec_Fwd : Vec3 := (0.0, 0.0, -1.0);
 
    function Camera_Position return Vec3 is (Cam_Eye);
    function Camera_Right return Vec3 is (Cam_R);
@@ -330,6 +332,8 @@ package body Renderer is
       if Cam_Fresh then
          Cam_Up := Want_Up;
          Cam_Fwd := Q.F;
+         Spec_Up := Track.Locate (Q.P, C.Hint).N;
+         Spec_Fwd := Track.Locate (Q.P, C.Hint).T;
       end if;
       Cam_Up := Normalize (Cam_Up + K_Up * (Want_Up - Cam_Up));
       Head := (if C.Speed > 6.0 and then Dot (C.V, Q.F) > 0.0 then C.V else Q.F);
@@ -415,6 +419,19 @@ package body Renderer is
                Eye := Q.P - (Back * Dist) * Fwd + High * Cam_Up;
                Target := Q.P + (Back * 4.0) * Fwd + 1.0 * Cam_Up;
                Up := Cam_Up;
+               if Spectator then
+                  declare
+                     B : constant Vec3 := Q.P - (Back * 10.0) * Spec_Fwd;
+                     L : constant Track.Locus := Track.Locate (B, C.Hint);
+                     Mid : constant Vec3 := L.C + (Float'Min (L.P.Height, 9.0) * 0.45) * L.N;
+                  begin
+                     Spec_Up := Normalize (Spec_Up + Float'Min (1.0, Dt * 2.0) * (L.N - Spec_Up));
+                     Spec_Fwd := Normalize (Spec_Fwd + Float'Min (1.0, Dt * 3.0) * (L.T - Spec_Fwd));
+                     Eye := Mid + 0.3 * (B - Mid) + 1.0 * Spec_Up;
+                     Target := Q.P + (Back * 3.0) * Spec_Fwd;
+                     Up := Spec_Up;
+                  end;
+               end if;
             end;
          end if;
          --  Not through the walls

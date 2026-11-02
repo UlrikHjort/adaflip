@@ -88,7 +88,10 @@ package body App is
    Frame_Count : Natural := 0;
    Autopilot : Boolean := False;
    Skip_Seconds : Float := 0.0;
+   Record_Dir : Unbounded_String;     --  a picture of every frame, for videos
+   Record_From, Record_Count : Natural := 0;
    Profile : Boolean := False;
+   No_Hud : Boolean := False;
    Time_Scene, Time_Hud, Time_Sim : Float := 0.0;
 
    function Env (N : String) return String is
@@ -655,7 +658,9 @@ package body App is
          end;
       end loop;
       Close (F);
-      Ada.Text_IO.Put_Line ("Wrote " & Name);
+      if Record_Count = 0 then
+         Ada.Text_IO.Put_Line ("Wrote " & Name);
+      end if;
    end Write_Picture;
 
    procedure Step_World (Dt : Float) is
@@ -690,7 +695,9 @@ package body App is
       pragma Unreferenced (A, Context, Data);
       use Ada.Real_Time;
       Now : constant Time := Clock;
-      Dt : constant Float := Float'Min (0.1, Float (To_Duration (Now - Last_Time)));
+      Dt : constant Float :=
+        (if Record_Count > 0 then 1.0 / 30.0   --  recording: the game's own clock
+         else Float'Min (0.1, Float (To_Duration (Now - Last_Time))));
       Viewport : aliased GL.GLint_Array (0 .. 3) := (others => 0);
       T0, T1, T2 : Time;
    begin
@@ -743,7 +750,9 @@ package body App is
          Overlay.Fps := Fps;
          Overlay.Show_Fps := Show_Fps;
          Overlay.Mode := Mode;
-         Hud.Draw (W, H, Overlay);
+         if not No_Hud then
+            Hud.Draw (W, H, Overlay);
+         end if;
          T2 := Ada.Real_Time.Clock;
          if Profile then
             Time_Scene := Time_Scene + Float (To_Duration (T1 - T0));
@@ -756,6 +765,18 @@ package body App is
                Time_Scene := 0.0;
                Time_Hud := 0.0;
                Time_Sim := 0.0;
+            end if;
+         end if;
+         if Record_Count > 0 and then Frame_Count >= Record_From
+           and then Frame_Count < Record_From + Record_Count
+         then
+            declare
+               N : constant String := Natural'Image (10_000 + Frame_Count - Record_From);
+            begin
+               Write_Picture (To_String (Record_Dir) & "/f" & N (N'First + 2 .. N'Last) & ".ppm", W, H);
+            end;
+            if Frame_Count + 1 = Record_From + Record_Count then
+               Gtk.Main.Main_Quit;
             end if;
          end if;
          if Shot_Frame > 0 and then Frame_Count = Shot_Frame then
@@ -847,7 +868,13 @@ package body App is
    begin
       Find_Home;
       Gtk.Main.Init;
-      Load_Choices;
+      --  The automated runs race with the defaults, the same every time
+      if Env ("ADAFLIP_AUTOSTART") = "" then
+         Load_Choices;
+      end if;
+      No_Hud := Env ("ADAFLIP_NO_HUD") /= "";
+      Race.Stunt_Player := Env ("ADAFLIP_STUNT") /= "";
+      Renderer.Spectator := Race.Stunt_Player;
       Shot_File := To_Unbounded_String (Env ("ADAFLIP_SHOT"));
       if Env ("ADAFLIP_SHOT_FRAME") /= "" then
          Shot_Frame := Natural'Value (Env ("ADAFLIP_SHOT_FRAME"));
@@ -865,6 +892,11 @@ package body App is
          Volume := Float'Value (Env ("ADAFLIP_VOLUME"));
       end if;
       Autopilot := Env ("ADAFLIP_AUTOPILOT") /= "";
+      if Env ("ADAFLIP_RECORD") /= "" then
+         Record_Dir := To_Unbounded_String (Env ("ADAFLIP_RECORD"));
+         Record_From := Natural'Value (Env ("ADAFLIP_RECORD_FROM"));
+         Record_Count := Natural'Value (Env ("ADAFLIP_RECORD_COUNT"));
+      end if;
       Profile := Env ("ADAFLIP_PROFILE") /= "";
 
       Gtk.Window.Gtk_New (Window);

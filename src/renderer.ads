@@ -32,6 +32,10 @@ package Renderer is
    --  Into the frame buffer GTK has bound; Alpha: how far between the last
    --  two physics steps
 
+   Spectator : Boolean := False;
+   --  The chase camera keeps the track's up and the middle of the tube, so
+   --  a car on a wall or roof is seen there (for videos)
+
    Flash : Float := 0.0;   --  0 .. 1, the screen lights up (when hit)
 
    function Camera_Position return Math3D.Vec3;

@@ -4,6 +4,24 @@ A combat racer in Ada and GtkAda. Its cars drive on whichever side they land on.
 walls and along tunnel roofs at speed, and fight with rockets, mines and shockwaves picked up
 from pods along the track. Play it with a game controller (an Xbox pad) or the keyboard.
 
+> **Early development.** It is playable from start to finish, but expect rough edges and
+> changes to handling, tracks and weapons.
+
+![Upside down along a tunnel roof](docs/gifs/roof.gif)
+
+| | |
+|---|---|
+| ![Through the pipe on its roof](docs/gifs/pipe.gif) | ![Thrown up the wall by a mine](docs/gifs/combat.gif) |
+| Through the pipe of Harbour Lights, on its roof | Thrown up the wall by a mine, and on again |
+| ![Frostline's tunnel roof](docs/gifs/frostline.gif) | ![The title screen](docs/screenshots/title.jpg) |
+| Along Frostline's tunnel roof | The title screen, over a race of AI cars |
+| ![The grid](docs/screenshots/grid.jpg) | ![A tunnel on Red Mesa Run](docs/screenshots/tunnel.jpg) |
+| On the grid at Red Mesa Run | Into a tunnel, a mine in hand |
+| ![Harbour Lights at night](docs/screenshots/harbour.jpg) | ![Frostline](docs/screenshots/frostline.jpg) |
+| Harbour Lights at night | Frostline at dusk |
+
+All of it is the game itself with the AI at the wheel, made by `scripts/make_media.sh`.
+
 > **Built with AI.** Written by [Claude](https://www.anthropic.com/claude) Opus 5.5 in Claude
 > Code from the author's prompts. The OpenGL, GtkGLArea, shader, mesh and gamepad layers come
 > from the author's earlier project AdaRace.
@@ -80,9 +98,13 @@ In the menus: d-pad or left stick to choose and change, A to select, B to go bac
 `simtest` has the AI race three laps on every track and checks that every car finishes.
 `walltest` puts a car on pipe walls and tunnel roofs at speed and checks that it stays there.
 
+`scripts/make_media.sh` makes the pictures and animations above (it needs ImageMagick and
+ffmpeg), and `bin/scan TRACK [stunt]` lists the lively moments of a race to pick them from.
 For automated pictures, the game reads `ADAFLIP_AUTOSTART`, `ADAFLIP_AUTOPILOT`,
 `ADAFLIP_TRACK`, `ADAFLIP_SKIP` (seconds to race ahead), `ADAFLIP_CAMERA`, `ADAFLIP_SHOT`
-(a .ppm file) with `ADAFLIP_SHOT_FRAME`, and `ADAFLIP_PROFILE`.
+(a .ppm file) with `ADAFLIP_SHOT_FRAME`, `ADAFLIP_RECORD` (a folder for every frame) with
+`ADAFLIP_RECORD_FROM` and `ADAFLIP_RECORD_COUNT`, `ADAFLIP_NO_HUD`, `ADAFLIP_STUNT` (the AI
+rides walls and roofs, filmed from the middle of the tube) and `ADAFLIP_PROFILE`.
 
 ## Licence
 

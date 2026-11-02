@@ -124,6 +124,9 @@ package Race is
    procedure Step (Input : Player_Input; Player_AI : Boolean := False);
    --  One physics step of Dt
 
+   Stunt_Player : Boolean := False;
+   --  The player's car driven by the AI rides the walls and roofs (videos)
+
    procedure Reset_Racer (I : Car_Index);
    --  Back on the floor where it left the track
 

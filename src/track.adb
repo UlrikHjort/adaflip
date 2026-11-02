@@ -296,6 +296,31 @@ package body Track is
       return Float'Max (0.0, A.P.Width / 2.0 - A.P.R_Bottom);
    end Floor_Half;
 
+   function Round_Point (S, Angle : Float) return Vec3 is
+      A : constant Sample := At_S (S);
+      CY : constant Float := A.P.Height / 2.0;
+      DX : constant Float := Sin (Angle);
+      DY : constant Float := -Cos (Angle);
+      Lo : Float := 0.0;
+      Hi : Float := A.P.Width + A.P.Height;
+   begin
+      for K in 1 .. 30 loop
+         declare
+            M : constant Float := (Lo + Hi) / 2.0;
+         begin
+            if Profile_Distance (A.P, M * DX, CY + M * DY) > 0.0 then
+               Lo := M;
+            else
+               Hi := M;
+            end if;
+         end;
+      end loop;
+      return A.C + (Lo * DX) * A.B + (CY + Lo * DY) * A.N;
+   end Round_Point;
+
+   function Angle_Of (L : Locus) return Float is
+     (Arctan (L.X, -(L.Y - L.P.Height / 2.0)));
+
    ---------------------------------------------------------------------------
    --  Building a track
    ---------------------------------------------------------------------------
