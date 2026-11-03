@@ -30,9 +30,11 @@ All of it is the game itself with the AI at the wheel, made by `scripts/make_med
 
     make run
 
-That needs GNAT, gprbuild, GtkAda, libepoxy and PulseAudio. On Debian, Ubuntu and Mint:
+That needs GNAT, gprbuild, GtkAda, libepoxy and PulseAudio. `make` checks for them first and
+says what is missing and how to install it (`make check` does only that). On Debian, Ubuntu
+and Mint:
 
-    sudo apt install gnat gprbuild libgtkada-dev libgtk-3-dev libepoxy-dev libpulse-dev
+    sudo apt install gnat gprbuild libgtkada-dev libgtk-3-dev libepoxy-dev libpulse-dev pkg-config
 
 The game needs OpenGL 4.5. An Xbox controller is found by itself, and one plugged in later is
 found within a few seconds. When several pads are plugged in, an Xbox pad is preferred.

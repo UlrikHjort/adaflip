@@ -15,6 +15,12 @@
 # "stunt": the AI at the player's wheel rides the walls and roofs.
 set -e
 cd "$(dirname "$0")/.."
+for tool in convert ffmpeg; do
+   if ! command -v $tool > /dev/null 2>&1; then
+      echo "make_media.sh needs $tool: sudo apt install imagemagick ffmpeg"
+      exit 1
+   fi
+done
 OUT=docs
 mkdir -p "$OUT/screenshots" "$OUT/gifs"
 TMP=$(mktemp -d)

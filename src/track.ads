@@ -77,6 +77,7 @@ package Track is
    --  On the floor, X metres right of the middle
 
    function Floor_Half (S : Float) return Float;
+   --  Half the width of the flat floor
 
    function Round_Point (S, Angle : Float) return Vec3;
    --  On the surface, Angle round the cross-section from the middle of the
@@ -84,7 +85,6 @@ package Track is
 
    function Angle_Of (L : Locus) return Float;
    --  Where a point is round the cross-section, as for Round_Point
-   --  Half the width of the flat floor
 
    --  Where the weapon pods are
    Max_Pods : constant := 60;
